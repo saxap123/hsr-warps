@@ -46,7 +46,7 @@
   return `<div class="va${wide?' wide':''}" data-screen="${esc(tab)}">
   <header class="va-top"><div class="brand"><span class="logo">✦</span><b>Трекер круток</b></div>
    <nav class="tabs">${NAV.map(([k,t])=>`<button class="${k===tab?'on':''}" data-act="tab" data-tab="${k}">${t}</button>`).join('')}</nav>
-   <div class="top-right"><span class="muted small">${accountLine(vm)}</span>
+   <div class="top-right"><span class="art-status small" data-art-status>${esc(ctx.art||'')}</span><span class="muted small">${accountLine(vm)}</span>
     <button class="btn icon${tab==='settings'?' on':''}" data-act="tab" data-tab="settings" title="Настройки">⚙</button>${refreshBtn(ctx.busy)}</div></header>
   ${ctx.status?`<div class="va-status">${ctx.status}</div>`:''}${ctx.notice?`<div class="va-status">${ctx.notice}</div>`:''}
   ${inner}</div>`;

@@ -3,11 +3,11 @@
    luck, plan, settings) draw from one view model (View.build). Nothing runs in the background. */
 (function(){
  const Core=window.WarpsCore,V=window.View,esc=V.esc,desktop=window.desktop;
- const S={ready:false,history:null,accounts:[],settings:{},cache:null,catalog:null,version:'',vm:null,
-  busy:null,progress:null,cancelling:false,found:null,problem:null,paste:'',pasteError:null,notice:null,error:null,tab:'main'};
+ const S={ready:false,history:null,accounts:[],settings:{},cache:null,version:'',vm:null,
+  busy:null,progress:null,cancelling:false,found:null,problem:null,paste:'',pasteError:null,notice:null,error:null,tab:'main',artUrls:{},artBusy:null};
  window.AppState=S;
  const message=e=>String(e?.message||e||'Неизвестная ошибка').replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/,'');
- function rebuild(){S.vm=S.history?V.build(S.history,{catalog:S.catalog,cache:S.cache,now:Date.now()}):null;}
+ function rebuild(){S.vm=S.history?V.build(S.history,{cache:S.cache,now:Date.now()}):null;}
  // ---------- shared pieces ----------
  const stepsHtml=()=>`<ol class="steps">${Core.MANUAL_STEPS.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`;
  function pasteHtml(){
@@ -61,7 +61,7 @@
   const root=document.getElementById('app');
   const key=focusKey(document.activeElement),sel=key&&document.activeElement.selectionStart!==undefined?[document.activeElement.selectionStart,document.activeElement.selectionEnd]:null;
   if(!S.ready){root.innerHTML='<div class="start"><div class="start-card"><p>Открываю сохранённую историю…</p></div></div>';return;}
-  const ctx={status:statusHtml(),notice:noticeHtml(),busy:!!S.busy};
+  const ctx={status:statusHtml(),notice:noticeHtml(),busy:!!S.busy,art:S.artBusy?`Загружаю картинки героев и конусов: ${S.artBusy.done} из ${S.artBusy.total}…`:''};
   if(!S.history&&S.tab!=='settings'){root.innerHTML=startHtml();return;}
   const screen=window.Screens[S.tab]||window.Screens.main;
   root.innerHTML=screen(S.vm,ctx);
@@ -72,13 +72,14 @@
  async function init(){
   desktop.onProgress(p=>{S.progress=p;drawProgress();});
   try{
-   const [state,catalog]=await Promise.all([desktop.state(),fetch('app://ui/catalog.json').then(r=>r.json())]);
-   Object.assign(S,{history:state.history,accounts:state.accounts||[],settings:state.settings||{},cache:state.cache,version:state.version,catalog});
+   const state=await desktop.state();
+   Object.assign(S,{history:state.history,accounts:state.accounts||[],settings:state.settings||{},cache:state.cache,version:state.version,artUrls:state.artUrls||{},artNet:state.artNet!==false});
    if(state.error)S.error='Не получилось открыть сохранённую историю: '+state.error;
    rebuild();
   }catch(e){S.error=message(e);}
   S.ready=true;draw();
   window.dispatchEvent(new Event('hsrw-ready'));
+  fetchArt();
   if(desktop.smoke)desktop.ready({screens:Object.keys(window.Screens),history:!!S.history,total:S.vm?.total||0,errors:[]});
  }
  async function find(){
@@ -99,7 +100,7 @@
   S.busy='update';S.progress=null;S.cancelling=false;S.error=null;S.notice=null;S.pasteError=null;if(!pasted)S.problem=null;draw();
   let r;try{r=await desktop.update(options);}catch(e){r={ok:false,code:'ERROR',reason:message(e)};}
   S.busy=null;S.progress=null;S.cancelling=false;
-  if(r.history){S.history=r.history;try{S.accounts=(await desktop.state()).accounts||S.accounts;}catch{}rebuild();}
+  if(r.history){S.history=r.history;try{S.accounts=(await desktop.state()).accounts||S.accounts;}catch{}rebuild();setTimeout(fetchArt,0);}
   const saved=!r.ok&&r.addedTotal?' Уже загруженное сохранено: '+V.pulls(r.addedTotal)+'.':'';
   if(r.ok){S.problem=null;S.paste='';S.notice={kind:'good',text:addedText(r,first)};}
   else if(r.code==='ABORTED')S.notice={kind:'warn',text:r.reason+saved};
@@ -108,6 +109,29 @@
   else S.error=r.reason+saved;
   draw();
  }
+ // Art of every pulled item and of the current banners' featured items, by game id, downloaded on demand from
+ // StarRailRes (main: art.cjs) after opening the history and after an update; an id the repository does not have yet
+ // keeps its initials and is retried by the main process once a day. Nothing is guessed.
+ function missingArt(){
+  const ids=new Set();
+  for(const list of Object.values(S.history?.byType||{}))for(const it of list||[])if(/^\d{4,5}$/.test(String(it.item_id||'')))ids.add(String(it.item_id));
+  for(const b of S.cache?.banners||[])for(const x of [...(b.up5||[]),...(b.featuredIds||[]).map(id=>({id}))])if(/^\d{4,5}$/.test(String(x.id||'')))ids.add(String(x.id));
+  return [...ids].filter(id=>!S.artUrls[id]);
+ }
+ const nameOf=id=>{for(const list of Object.values(S.history?.byType||{}))for(const it of list||[])if(String(it.item_id)===id)return it.name||id;return id;};
+ async function fetchArt(){
+  const ids=missingArt();if(!ids.length||S.artBusy||!desktop.art||!S.artNet)return;
+  S.artBusy={done:0,total:ids.length};drawArt();
+  let r=null;try{r=await desktop.art(ids);}catch{}
+  S.artBusy=null;
+  if(r){S.artUrls=r.urls||S.artUrls;
+   if(r.resolved?.length)rebuild();
+   // Only what the user should know: items the repository does not have yet.
+   if(r.missed?.length){const text='Картинок пока нет в StarRailRes для: '+r.missed.map(nameOf).join(', ')+' — показаны инициалы, программа проверит снова через сутки.';S.notice=S.notice?{kind:S.notice.kind,text:S.notice.text+' '+text}:{kind:'warn',text};}}
+  draw();
+ }
+ function drawArt(){const el=document.querySelector('[data-art-status]');if(el)el.textContent=S.artBusy?`Загружаю картинки героев и конусов: ${S.artBusy.done} из ${S.artBusy.total}…`:'';}
+ desktop.onArtProgress?.(p=>{if(S.artBusy){S.artBusy={done:p.done,total:p.total};drawArt();}});
  function paste(){
   const text=S.paste.trim(),link=Core.parseLink(text);
   if(!link.ok){S.pasteError=link.reason;S.problem=S.problem||{reason:'Ссылка не подошла.',steps:true};draw();document.querySelector('[data-paste]')?.focus();return;}
@@ -117,7 +141,7 @@
   let r;try{r=await desktop.importFile();}catch(e){r={ok:false,reason:message(e)};}
   if(!r)return;
   if(!r.ok){S.error=r.reason;draw();return;}
-  const st=await desktop.state();Object.assign(S,{history:st.history,accounts:st.accounts,settings:st.settings});rebuild();
+  const st=await desktop.state();Object.assign(S,{history:st.history,accounts:st.accounts,settings:st.settings});rebuild();setTimeout(fetchArt,0);
   S.notice={kind:'good',text:`Импорт ${r.format}: `+r.result.map(x=>`UID ${x.uid} — добавлено ${V.pulls(x.added)}, всего ${V.pulls(x.total)}`).join('; ')+(r.warnings?.length?' '+r.warnings.join(' '):'')};draw();
  }
  document.addEventListener('click',e=>{
@@ -131,6 +155,6 @@
   else if(a==='tab'){S.tab=el.dataset.tab;S.notice=S.busy?S.notice:null;draw();scrollTo(0,0);}
  });
  document.addEventListener('input',e=>{if(e.target.matches?.('[data-paste]'))S.paste=e.target.value;});
- window.App={state:S,draw,rebuild,find,load};
+ window.App={state:S,draw,rebuild,find,load,fetchArt,missingArt};
  init();
 })();

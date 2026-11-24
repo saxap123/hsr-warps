@@ -6,7 +6,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const C=require('../app/core/warps-core.js'),A=require('../app/core/analysis.js'),M=require('../app/core/model.js');
-const W=require('../app/warps.cjs'),G=require('../app/game-cache.cjs'),catalog=require('../app/catalog.json');
+const W=require('../app/warps.cjs'),G=require('../app/game-cache.cjs');
 const root=path.join(__dirname,'..','.realdata'),dir=path.join(root,'warps');
 (async()=>{
  const found=W.findLink({});
@@ -34,8 +34,8 @@ const root=path.join(__dirname,'..','.realdata'),dir=path.join(root,'warps');
    console.log('  compare type',t,'earlier',a.size,'now',b.size,'only earlier',onlyOld,'only now',onlyNew,'field differences',diff);
   }
  }
- const fc=A.fromGameCache(cache.banners,{catalog,history:h});
- const st=A.analyze(h,{catalog,now:Date.now(),pools:fc.pools,discovered:cache.pageTypes});
+ const fc=A.fromGameCache(cache.banners,{history:h});
+ const st=A.analyze(h,{now:Date.now(),pools:fc.pools,discovered:cache.pageTypes});
  console.log('complete history:',st.complete,'total',st.total,'5★',st.fiveCount,'jade',st.jade);
  for(const b of st.shown)console.log(' ',b.title,'| pulls',b.total,'| pity',(b.pity5Exact?'':'≥')+b.pity5+'/'+b.maxPity,'| guarantee',b.guarantee,'| 50/50',JSON.stringify(b.fifty),'| avg5',b.avgPity5,'('+b.avgPity5Count+') exp',b.expected5,'| avg4',b.avgPity4,'exp',b.expected4);
  const L=M.luck(A.luckInput(st));

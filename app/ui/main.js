@@ -7,7 +7,7 @@
    ${b.heroArt?`<img class="va-banner-art${b.kind==='lightcone'?' cone':''}" src="${esc(b.heroArt)}" alt="" draggable="false">`:''}
    <div class="va-banner-body"><h3>${esc(b.title)}</h3><small class="muted sub">${esc(b.current?(b.current.name||b.current.title):b.lastFive?'последняя 5★: '+b.lastFive.name:' ')}</small>
     <div class="va-num" data-pity><b>${esc(U.counterValue(b))}</b>${b.maxPity&&!b.finished?`<span>/ ${b.maxPity}</span>`:''}</div>
-    ${U.pityBar(b,{label:false})}${U.guaranteeHtml(b)}</div></article>`;
+    ${b.finished?'<p class="muted done">Все 50 прыжков сделаны</p>':U.pityBar(b,{label:false})}${U.guaranteeHtml(b)}</div></article>`;
  }
  function render(vm,ctx){
   const main=vm.banners.find(b=>b.type==='11')||vm.banners[0];
@@ -19,7 +19,7 @@
   <section class="va-hero" data-banner="${esc(main.type)}">
    ${art?`<div class="va-hero-bg" style="background-image:url('${esc(art)}')"></div>`:''}
    <div class="va-hero-main">
-    <p class="eyebrow">${main.current?`Сейчас в игре · «${esc(main.current.title)}»`:esc(main.title)}</p>
+    <p class="eyebrow">${main.current?`Сейчас в игре · «${esc(main.current.title)}»`:main.lastFive?`Последняя 5★ · ${esc(main.lastFive.name)} · ${esc(V.day(main.lastFive.time))}`:esc(main.title)}</p>
     <h1>${esc(main.title)}</h1>
     <div class="va-counter" data-pity><b>${esc(U.counterValue(main))}</b><span>/ ${main.maxPity||'?'}</span></div>
     <p class="va-label">прыжков с последней 5★</p><p class="va-left">${esc(U.leftText(main))}</p>

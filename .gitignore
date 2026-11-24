@@ -1,5 +1,14 @@
+# build tools and builds
 .build-tools/
 dist/
-.realdata/
 node_modules/
+__pycache__/
+
+# personal data: real history, profiles, screenshots of real data, scans — never in the repository
+.realdata/
+userdata/
 *.log
+smoke-test.json
+archiver_output.json
+SRGF-*.json
+UIGF-*.json

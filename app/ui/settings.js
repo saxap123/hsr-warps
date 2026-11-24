@@ -5,7 +5,7 @@
   const S=window.AppState,acc=S.accounts.filter(a=>!a.broken),broken=S.accounts.filter(a=>a.broken);
   const set=S.settings||{},types=vm?vm.st.shown.map(b=>`${b.title}: ${V.num(b.total)}`).join(' · '):'';
   return U.shell(vm,ctx,`
-   <div class="page-head"><div><h1>Настройки</h1><p class="muted">Всё хранится в папке userdata рядом с программой. Программа ничего не отправляет, кроме запросов истории на официальный сервер HoYoverse.</p></div></div>
+   <div class="page-head"><div><h1>Настройки</h1><p class="muted">Всё хранится в папке userdata рядом с программой. В сеть уходят только запросы истории на официальный сервер HoYoverse и загрузка картинок героев и конусов из открытого репозитория StarRailRes на GitHub.</p></div></div>
    <div class="set-grid">
     <section class="panel"><h2>Аккаунт</h2>
      ${acc.length?`<div class="acc-list">${acc.map(a=>`<button class="acc${vm&&a.uid===vm.uid?' on':''}" data-act="sacc" data-uid="${esc(a.uid)}"><b>UID ${esc(a.uid)}</b><span>${V.num(a.total)} ${esc(window.WarpsCore.plural(a.total,['прыжок','прыжка','прыжков']))} · обновлено ${esc(V.when(a.updatedAt)||'—')}</span></button>`).join('')}</div>`:'<p class="muted">Сохранённой истории пока нет.</p>'}
@@ -22,9 +22,9 @@
      <p class="muted small">${set.archiverFile?'Файл: '+esc(set.archiverFile):'Файл скана ещё не выбран.'}</p>
      <div class="row"><button class="btn" data-act="sarch">Выбрать файл скана…</button></div></section>
     <section class="panel"><h2>Ссылка и приватность</h2>
-     <ul class="plain"><li>Ссылка на историю ищется в кэше игры (только чтение файлов; память игры не трогается).</li><li>Ключ из ссылки живёт около суток и хранится только в памяти программы, пока она открыта: не пишется ни в историю, ни в лог, ни в экспорт.</li><li>Между запросами к серверу — пауза не меньше 0,3 с.</li><li>Арт баннеров берётся из кэша игры, портреты героев и конусов встроены в программу.</li></ul></section>
+     <ul class="plain"><li>Ссылка на историю ищется в кэше игры (только чтение файлов; память игры не трогается).</li><li>Ключ из ссылки живёт около суток и хранится только в памяти программы, пока она открыта: не пишется ни в историю, ни в лог, ни в экспорт.</li><li>Между запросами к серверу — пауза не меньше 0,3 с.</li><li>Арт баннеров берётся из кэша игры. Картинки героев и конусов в программу не встроены: они загружаются по игровому ID из открытого репозитория StarRailRes (github.com/Mar-7th/StarRailRes) только для того, что есть в твоей истории, и хранятся в userdata/art. Если картинки ещё нет — показываются инициалы, проверка повторяется через сутки.</li></ul></section>
     <section class="panel"><h2>О программе</h2><p>HSR Warp Tracker ${esc(S.version)} · личный трекер круток Honkai: Star Rail.</p>
-     <p class="muted small">Основа — модуль «Крутки» из HSR Atelier. Модель мягкого гаранта — оценка сообщества игроков, официальные только базовые шансы, гарант 90/80 и 50/50, 75/25.</p></section>
+     <p class="muted small">Не связана с HoYoverse / COGNOSPHERE. Honkai: Star Rail и игровые изображения принадлежат их правообладателям. Модель мягкого гаранта — оценка сообщества игроков; официальные только базовые шансы, гарант 90/80 и 50/50, 75/25. Картинки: StarRailRes (Mar-7th), загружаются при использовании.</p></section>
    </div>`,{tab:'settings'});
  }
  document.addEventListener('click',async e=>{

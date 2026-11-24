@@ -9,13 +9,15 @@
 // HSRW_PROFILE=<folder> (any launch) moves userdata, e.g. for a test profile.
 const {app,BrowserWindow,protocol,net,ipcMain,dialog,session,Menu,shell}=require('electron');
 const path=require('node:path'),fs=require('node:fs'),crypto=require('node:crypto'),{pathToFileURL}=require('node:url');
-const W=require('./warps.cjs'),G=require('./game-cache.cjs'),Core=require('./core/warps-core.js'),Srgf=require('./core/srgf.js'),{readArchiver}=require('./archiver.cjs');
+const W=require('./warps.cjs'),G=require('./game-cache.cjs'),{createArtResolver}=require('./art.cjs'),Core=require('./core/warps-core.js'),Srgf=require('./core/srgf.js'),{readArchiver}=require('./archiver.cjs');
 const root=__dirname,test=process.argv.includes('--test'),shots=process.argv.includes('--shots'),smoke=process.argv.includes('--smoke-test'),hidden=test||shots||smoke;
+// --no-game (screenshots of synthetic data): the game files are not read at all.
+const noGame=process.argv.includes('--no-game');
 const profile=process.env.HSRW_PROFILE?path.resolve(process.env.HSRW_PROFILE):path.join(path.dirname(process.execPath),'userdata',smoke?'smoke-test-profile':'');
 app.setPath('userData',profile);app.setName('HSR Warp Tracker');
 protocol.registerSchemesAsPrivileged([{scheme:'app',privileges:{standard:true,secure:true,supportFetchAPI:true}}]);
 const version=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;
-const dirs={warps:path.join(profile,'warps'),banners:path.join(profile,'banners'),log:path.join(profile,'app.log'),settings:path.join(profile,'settings.json')};
+const dirs={warps:path.join(profile,'warps'),banners:path.join(profile,'banners'),art:path.join(profile,'art'),log:path.join(profile,'app.log'),settings:path.join(profile,'settings.json')};
 const log=W.createLog({file:dirs.log});
 // ---------- settings (small JSON, atomic write) ----------
 const SETTINGS_KEYS={archiverFile:v=>typeof v==='string'&&v.length<1024?v:undefined,jade:v=>Number.isFinite(+v)&&+v>=0&&+v<1e8?Math.floor(+v):undefined,
@@ -29,7 +31,7 @@ function writeSettings(patch){
 // ---------- game files (read only) ----------
 const testValue=name=>test?process.env[name]||'':'';
 // --test: a fake game tree or none; --shots (screenshots) reads the real game files like a normal launch (read only).
-function gameEnv(){if(!test)return process.env;const home=testValue('HSRW_TEST_HOME');return home?{USERPROFILE:path.resolve(home),APPDATA:path.join(path.resolve(home),'AppData','Roaming')}:{};}
+function gameEnv(){if(noGame)return {};if(!test)return process.env;const home=testValue('HSRW_TEST_HOME');return home?{USERPROFILE:path.resolve(home),APPDATA:path.join(path.resolve(home),'AppData','Roaming')}:{};}
 // History requests go through their own in-memory session without an HTTP cache: the default session would write
 // every request URL — authkey included — into userdata/Cache/Cache_Data (caught by test_ui_electron.cjs).
 let apiSession=null;
@@ -42,7 +44,21 @@ function warpsFetch(url,options){
  if(!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(origin))return Promise.reject(Error('Test launch: HSRW_TEST_ORIGIN=http://127.0.0.1:<port> is required'));
  const u=new URL(url);return api().fetch(origin+u.pathname+u.search,o);
 }
-let cacheInfo={pageTypes:{},banners:[],readAt:0},bannerImages=new Map();
+// Art of pulled items (art.cjs): downloaded on demand from the StarRailRes repository on GitHub by game id. Own in-memory
+// session without cache or cookies. Test launches only reach a loopback origin (--test); screenshots (--shots) only
+// with --art-net (README screenshots of synthetic data); smoke never.
+const artNet=!(shots||smoke)||(shots&&process.argv.includes('--art-net'));
+let artSession=null;
+const artApi=()=>artSession||(artSession=session.fromPartition('hsrw-art',{cache:false}));
+function artFetch(url,options){
+ const o={...options,cache:'no-store',headers:{'user-agent':'HSR-Warp-Tracker/'+version+' (personal warp tracker)'}};
+ const u=new URL(url);if(u.protocol!=='https:'||u.hostname!=='raw.githubusercontent.com')return Promise.reject(Error('Unexpected host'));
+ if(!test)return artNet?artApi().fetch(url,o):Promise.reject(Error('No network for art in this launch'));
+ const origin=testValue('HSRW_TEST_ORIGIN');
+ if(!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(origin))return Promise.reject(Error('Test launch: no network for art'));
+ return artApi().fetch(origin+'/srr'+u.pathname+u.search,o);
+}
+let cacheInfo={pageTypes:{},banners:[],readAt:0};
 // Banner details and their strip images from the game cache; images are copied to userdata/banners so they stay
 // after the game clears its cache. Only the image is copied, never a cached link.
 function readGameCacheInfo(installDir){
@@ -66,7 +82,7 @@ app.whenReady().then(()=>{
  const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.webp':'image/webp','.png':'image/png','.svg':'image/svg+xml'};
  protocol.handle('app',request=>{
   const url=new URL(request.url);let base;
-  if(url.hostname==='banner')base=dirs.banners;else if(url.hostname==='items')base=path.join(root,'assets','items');else if(url.hostname==='ui')base=root;else return new Response('Not found',{status:404});
+  if(url.hostname==='banner')base=dirs.banners;else if(url.hostname==='art')base=dirs.art;else if(url.hostname==='items')base=path.join(root,'assets','items');else if(url.hostname==='ui')base=root;else return new Response('Not found',{status:404});
   let rel;try{rel=decodeURIComponent(url.pathname);}catch{return new Response('Not found',{status:404});}
   const file=path.resolve(base,'.'+rel);
   if(!file.startsWith(base+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile())return new Response('Not found',{status:404});
@@ -78,15 +94,16 @@ app.whenReady().then(()=>{
  Menu.setApplicationMenu(null);
  const trusted=event=>{if(event.sender!==win.webContents)throw Error('Unknown renderer');};
  const service=W.createWarpsService({dir:dirs.warps,fetch:warpsFetch,log});
+ const art=createArtResolver({dir:dirs.art,fetch:artFetch,log});
  savedCacheInfo();
  let link=null,abort=null;
  ipcMain.handle('hsrw-state',event=>{
   trusted(event);const settings=readSettings();
   // Banner details once per launch (read only, a few tens of ms): the current banner art without a link.
-  if(!test&&Date.now()-(cacheInfo.readAt||0)>3600000){try{const r=service.findLink({env:gameEnv()});if(r.installDir)readGameCacheInfo(r.installDir);}catch{}}
+  if(!test&&!noGame&&Date.now()-(cacheInfo.readAt||0)>3600000){try{const r=service.findLink({env:gameEnv()});if(r.installDir)readGameCacheInfo(r.installDir);}catch{}}
   const accounts=service.accounts().map(({file,...a})=>a),pick=accounts.find(a=>!a.broken&&a.uid===settings.uid)||accounts.find(a=>!a.broken);
   let history=null,error='';try{history=pick?service.load(pick.uid):null;}catch(e){error=e.message;}
-  return {version,history,accounts,settings,cache:cacheInfo,error,test:hidden};
+  return {version,history,accounts,settings,cache:cacheInfo,artUrls:art.urls(),artNet,error,test:hidden};
  });
  ipcMain.handle('hsrw-find',event=>{
   trusted(event);const r=service.findLink({env:gameEnv()});
@@ -108,6 +125,13 @@ app.whenReady().then(()=>{
    if(r.uid)writeSettings({uid:r.uid});
    return r;
   }finally{if(abort===ctl)abort=null;}
+ });
+ // Art of the given game ids (validated: 4-5 digits, at most 1000), progress on 'hsrw-art-progress'.
+ ipcMain.handle('hsrw-art',async(event,list)=>{
+  trusted(event);
+  const ids=[...new Set((Array.isArray(list)?list:[]).slice(0,1000).map(x=>String(x??'')).filter(x=>/^\d{4,5}$/.test(x)))];
+  if(!ids.length)return {resolved:[],missed:[],failed:[],urls:art.urls()};
+  return art.resolve(ids,{onProgress:p=>{if(!win.isDestroyed())win.webContents.send('hsrw-art-progress',p);}});
  });
  ipcMain.handle('hsrw-cancel',event=>{trusted(event);const busy=!!abort;abort?.abort();return busy;});
  ipcMain.handle('hsrw-load',(event,uid)=>{trusted(event);const h=service.load(String(uid??''));if(h)writeSettings({uid:h.uid});return h;});

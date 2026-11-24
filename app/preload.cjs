@@ -13,5 +13,7 @@ contextBridge.exposeInMainWorld('desktop',Object.freeze({
  exportFile:(uid,format)=>ipcRenderer.invoke('hsrw-export',{uid:String(uid??''),format:format==='uigf'?'uigf':'srgf'}),
  archiver:choose=>ipcRenderer.invoke('hsrw-archiver',{choose:!!choose}),
  openData:()=>ipcRenderer.invoke('hsrw-open-data'),
+ art:ids=>ipcRenderer.invoke('hsrw-art',Array.isArray(ids)?ids.map(String):[]),
+ onArtProgress:callback=>{const h=(_e,p)=>callback(p);ipcRenderer.on('hsrw-art-progress',h);return ()=>ipcRenderer.removeListener('hsrw-art-progress',h);},
  onProgress:callback=>{const h=(_e,p)=>callback(p);ipcRenderer.on('hsrw-progress',h);return ()=>ipcRenderer.removeListener('hsrw-progress',h);}
 }));

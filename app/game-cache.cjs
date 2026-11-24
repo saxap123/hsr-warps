@@ -62,26 +62,30 @@ function bannerFrom(json){
 // dirs: Cache_Data folders, newest first. Banners: one per banner (hash), Russian text preferred, newest seen first.
 function readGameCache({dirs=[],fs=nodeFs,path=nodePath,langs=['ru-ru','en-us']}={}){
  const caches=dirs.map(d=>{try{return openCache(d,{fs,path});}catch{return null;}}).filter(c=>c&&c.entries.length);
- let pageTypes={},pageSeen=0;const byHash=new Map();
+ let pageTypes={},pageSeen=0;const byHash=new Map(),raw=new Map();
  for(const c of caches){
   for(const e of c.entries){
    if(/\/hkrpg\/event\/[^/?]*gacha[^/?]*\/bundle_[^/?]+\.js(\?|$)/.test(e.url)&&e.created>=pageSeen){const js=c.body(e);if(js){const t=parsePageTypes(js.toString('utf8'));if(Object.keys(t).length){pageTypes=t;pageSeen=e.created;}}}
    const m=/^https:\/\/[a-z0-9.-]+\.(?:hoyoverse|mihoyo)\.com\/gacha_info\/hkrpg\/([a-z0-9_]+)\/([0-9a-f]{16,64})\/([a-z]{2}-[a-z]{2})\.json(\?|$)/.exec(e.url);
    if(m){
+    const b=c.body(e);let json=null;try{json=b?JSON.parse(b.toString('utf8')):null;}catch{}
+    if(!json||typeof json!=='object')continue;
+    // Every language of a banner is kept (art.cjs pairs Russian and English names of the same lists).
+    const r=raw.get(m[2])||{key:m[2],server:m[1],langs:{},seen:{}};
+    if(!r.langs[m[3]]||r.seen[m[3]]<e.created){r.langs[m[3]]=json;r.seen[m[3]]=e.created;}raw.set(m[2],r);
     const prev=byHash.get(m[2]),rank=l=>{const i=langs.indexOf(l);return i<0?99:i;};
     if(prev&&(rank(prev.lang)<rank(m[3])||(rank(prev.lang)===rank(m[3])&&prev.seenAt>=e.created))){prev.seenAt=Math.max(prev.seenAt,e.created);continue;}
-    const b=c.body(e);let json=null;try{json=b?JSON.parse(b.toString('utf8')):null;}catch{}
-    if(!json)continue;
     byHash.set(m[2],{...bannerFrom(json),key:m[2],server:m[1],lang:m[3],seenAt:Math.max(e.created,prev?.seenAt||0),cache:c});
    }
   }
  }
  const banners=[...byHash.values()].sort((a,b)=>b.seenAt-a.seenAt);
+ const bannerJson=[...raw.values()].map(({seen,...r})=>({...r,seenAt:Math.max(0,...Object.values(seen))})).sort((a,b)=>b.seenAt-a.seenAt);
  function image(url){
   for(const c of caches)for(const e of c.entries)if(e.url===url){const b=c.body(e,{max:4*MB});if(b&&b.length>8&&b.readUInt32BE(0)===0x89504e47)return b;}
   return null;
  }
- return {pageTypes,banners:banners.map(({cache,...b})=>b),image,dirs:caches.map(c=>c.dir)};
+ return {pageTypes,banners:banners.map(({cache,...b})=>b),bannerJson,image,dirs:caches.map(c=>c.dir)};
 }
 // Cache_Data folders of one install: every webCaches/<version>/Cache/Cache_Data (and the old layout), newest first.
 function cacheDirs(dataDir,{fs=nodeFs,path=nodePath}={}){
