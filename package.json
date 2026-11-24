@@ -6,8 +6,8 @@
   "scripts": {
     "assets": "node scripts/build_assets.cjs",
     "test": "node scripts/test_warps.cjs && node scripts/test_tracker.cjs",
-    "test:ui": ".build-tools\electron\electron.exe scripts/test_ui_electron.cjs",
-    "shots": ".build-tools\electron\electron.exe scripts/shots.cjs",
+    "test:ui": ".build-tools/electron/electron.exe scripts/test_ui_electron.cjs",
+    "shots": ".build-tools/electron/electron.exe scripts/shots.cjs",
     "package": "python scripts/package_app.py && python scripts/zip_release.py"
   }
 }

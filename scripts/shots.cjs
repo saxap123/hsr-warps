@@ -32,6 +32,12 @@ app.whenReady().then(async()=>{
   fs.writeFileSync(path.join(out,name+'.png'),(await win.webContents.capturePage()).toPNG());report.shots.push({name,h:full});
  }
  const tab=async t=>{await js(`AppState.tab=${JSON.stringify(t)};AppState.notice=null;App.draw();scrollTo(0,0)`);await sleep(500);};
+ // --start: an empty profile — the start screen, and the screen after a link the server called expired.
+ if(process.argv.includes('--start')){
+  await js(`AppState.problem=null;App.draw()`);await shot('00-start',{max:1100});
+  await js(`AppState.problem={title:'Ссылка устарела',reason:WarpsCore.REASONS.expired+'. Ссылка из игры от 23 ноября, 20:55 — ей уже 26 ч, а живёт она около суток. Если сервер скажет «устарела», открой историю прыжков в игре ещё раз.',steps:true};App.draw()`);await shot('00-start-expired',{max:1500});
+  fs.writeFileSync(path.join(out,'report-start.json'),JSON.stringify(report,null,1));console.log(JSON.stringify({ok:!errors.length,errors}));app.exit(0);return;
+ }
  await tab('main');await shot('01-main');
  await tab('history');await shot('02-history',{max:2600});
  await js(`History.goto(AppState.vm.recent[0].id)`);await sleep(400);await js(`HistoryState.flash='';App.draw();scrollTo(0,0)`);await sleep(300);await shot('03-history-open',{max:2600});

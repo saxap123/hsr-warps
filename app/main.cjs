@@ -82,6 +82,8 @@ app.whenReady().then(()=>{
  let link=null,abort=null;
  ipcMain.handle('hsrw-state',event=>{
   trusted(event);const settings=readSettings();
+  // Banner details once per launch (read only, a few tens of ms): the current banner art without a link.
+  if(!test&&Date.now()-(cacheInfo.readAt||0)>3600000){try{const r=service.findLink({env:gameEnv()});if(r.installDir)readGameCacheInfo(r.installDir);}catch{}}
   const accounts=service.accounts().map(({file,...a})=>a),pick=accounts.find(a=>!a.broken&&a.uid===settings.uid)||accounts.find(a=>!a.broken);
   let history=null,error='';try{history=pick?service.load(pick.uid):null;}catch(e){error=e.message;}
   return {version,history,accounts,settings,cache:cacheInfo,error,test:hidden};
