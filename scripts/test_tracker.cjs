@@ -64,12 +64,13 @@ async function main(){
  const addr=(type,file,num,blocks=1)=>(0x80000000|(type<<28)|((blocks-1)<<24)|(file<<16)|num)>>>0;
  const store=buf=>{if(buf.length>4096*4){const n=fNo++;files['f_'+n.toString(16).padStart(6,'0')]=buf;return (addr(0,0,0)|n)>>>0;}const blocks=Math.ceil(buf.length/4096)||1,start=block3;block3+=blocks;const b=Buffer.alloc(blocks*4096);buf.copy(b);data3.push(b);return addr(4,3,start,blocks);};
  const entry=(url,body,{enc='',type='application/json',created=Date.UTC(2026,10,20)}={})=>{
-  const off=8192+256*(slot++),key=Buffer.from('1/0/'+url,'latin1');assert(key.length<=160);
+  const off=8192+256*(slot++),key=Buffer.from('1/0/'+url,'latin1');
   const headers=Buffer.from('HTTP/1.1 200\0content-type: '+type+'\0'+(enc?'content-encoding: '+enc+'\0':'')+'date: Mon, 23 Nov 2026 17:55:16 GMT\0\0','latin1');
   const coded=enc==='br'?zlib.brotliCompressSync(body):enc==='gzip'?zlib.gzipSync(body):body;
   data1.writeBigInt64LE(FILETIME(created),off+24);data1.writeInt32LE(key.length,off+32);
   data1.writeInt32LE(headers.length,off+40);data1.writeInt32LE(coded.length,off+44);
-  data1.writeUInt32LE(store(headers),off+56);data1.writeUInt32LE(store(coded),off+60);key.copy(data1,off+96);
+  data1.writeUInt32LE(store(headers),off+56);data1.writeUInt32LE(store(coded),off+60);
+  if(key.length<=160)key.copy(data1,off+96);else data1.writeUInt32LE(store(key),off+36);   // long keys live in a block of their own
  };
  const png=Buffer.concat([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]),Buffer.alloc(30000,7)]);
  const info=(title,type,up,extra={})=>Buffer.from(JSON.stringify({title,gacha_type:type,items_up_star_5:[{item_id:0,item_name:up,item_type:'avatar',star:5,is_up:0,image_url:'https://operation-webstatic.hoyoverse.com/gacha_info/hkrpg/aa_1.png',origin_item_id:0}],items_up_star_4:[],
@@ -80,8 +81,14 @@ async function main(){
  entry('https://operation-webstatic.hoyoverse.com/gacha_info/hkrpg/prod_official_eur/'+'b'.repeat(40)+'/ru-ru.json',info('Новый баннер','11','Светлячок'),{enc:'br',created:Date.UTC(2026,10,21)});
  entry('https://operation-webstatic.hoyoverse.com/gacha_info/hkrpg/aa_1.png',png,{type:'image/png'});
  // A history call with an authkey in the cache: the reader never returns it.
- entry(apiLink('SECRET_CACHE_KEY').slice(0,150),Buffer.from('{"retcode":0}'),{});
+ entry(apiLink('SECRET_CACHE_KEY'),Buffer.from('{"retcode":0}'),{created:Date.UTC(2026,10,1)});
+ // Two more links: the newer `timestamp` parameter belongs to the OLDER stored response (as in a real cache).
+ const withTs=(key,ts)=>apiLink(key).replace('&lang=ru','&timestamp='+ts+'&lang=ru');
+ entry(withTs('KEY_STORED_EARLIER',1800000000),Buffer.from('{"retcode":0}'),{created:Date.UTC(2026,10,10)});
+ entry(withTs('KEY_STORED_LAST',1700000000),Buffer.from('{"retcode":0}'),{created:Date.UTC(2026,10,23,17,55)});
  fs.writeFileSync(path.join(dir,'data_1'),data1);fs.writeFileSync(path.join(dir,'data_3'),Buffer.concat([Buffer.alloc(8192),...data3]));for(const [n,b] of Object.entries(files))fs.writeFileSync(path.join(dir,n),b);
+ // data_2 as the old search sees it: both links, the one with the newer timestamp parameter last.
+ fs.writeFileSync(path.join(dir,'data_2'),Buffer.concat([Buffer.alloc(9000),Buffer.from('1/0/'+withTs('KEY_STORED_LAST',1700000000)+' '+'1/0/'+withTs('KEY_STORED_EARLIER',1800000000)+' ','latin1')]));
  const before=walk(dir).map(f=>f+'|'+fs.statSync(f).mtimeMs).sort();
  const r=G.readGameCache({dirs:[dir]});
  assert.deepEqual(walk(dir).map(f=>f+'|'+fs.statSync(f).mtimeMs).sort(),before,'the cache is only read');
@@ -92,6 +99,15 @@ async function main(){
  assert(!JSON.stringify(r.banners).includes('SECRET_CACHE_KEY'));
  const fc=A.fromGameCache(r.banners,{catalog});assert.equal(fc.current['11'].title,'Новый баннер');assert.equal(fc.current['11'].featured[0].id,'1310');assert(fc.pools.standardCharacters.includes('1101'));
  assert.deepEqual(G.readGameCache({dirs:[tempDir('empty')]}).banners,[]);
+ // findLink on a game tree with this cache: the link stored last wins, with its time; nothing is written.
+ const home=tempDir('home'),game=path.join(home,'Games','StarRail_Data'),cd=path.join(game,'webCaches','2.54.0.0','Cache','Cache_Data');
+ fs.mkdirSync(path.join(home,'AppData','LocalLow','Cognosphere','Star Rail'),{recursive:true});fs.writeFileSync(path.join(home,'AppData','LocalLow','Cognosphere','Star Rail','Player.log'),'Loading player data from '+game.split(path.sep).join('/')+'/data.unity3d\n');
+ fs.cpSync(dir,cd,{recursive:true});const snap=walk(home).map(f=>f+'|'+fs.statSync(f).mtimeMs).sort();
+ const fl=W.findLink({env:{USERPROFILE:home}});
+ assert.equal(fl.ok,true,fl.reason);assert.equal(C.parseLink(fl.url).params.authkey,'KEY_STORED_LAST','the newest stored link, not the newest timestamp parameter');assert.equal(fl.linkTime,Date.UTC(2026,10,23,17,55));
+ assert.deepEqual(fl.candidates.map(u=>C.parseLink(u).params.authkey),['KEY_STORED_LAST','KEY_STORED_EARLIER','SECRET_CACHE_KEY']);
+ assert.deepEqual(walk(home).map(f=>f+'|'+fs.statSync(f).mtimeMs).sort(),snap,'findLink only reads');
+ assert.equal(C.extractLinks(fs.readFileSync(path.join(dir,'data_2'))).at(-1).params.authkey,'KEY_STORED_EARLIER','without the index the timestamp parameter would pick the older link');
 }
 // ---------- store: backup before every write that adds pulls ----------
 {

@@ -3,7 +3,7 @@
 // never game memory, never writing into the game folder), fetch the official endpoint with pauses, keep history locally.
 // fs, path, env, fetch, sleep and clock are injectable for tests.
 const nodeFs=require('node:fs'),nodePath=require('node:path');
-const Core=require('./core/warps-core.js');
+const Core=require('./core/warps-core.js'),{openCache}=require('./game-cache.cjs');
 
 const CN_LOG_DIR='崩坏：星穹铁道'; // 崩坏：星穹铁道, full-width colon U+FF1A
 const LOG_NAMES=['Player.log','Player-prev.log'];
@@ -49,6 +49,18 @@ function cacheFiles(fs,path,dataDir){
  }
  return out;
 }
+// History links of the blockfile index (data_1) of one Cache_Data folder, one per authkey, newest stored first.
+function indexedLinks(fs,path,dir){
+ let cache;try{cache=openCache(dir,{fs,path});}catch{return [];}
+ const byKey=new Map();
+ for(const e of cache.entries){
+  if(e.url.indexOf('authkey=')<0||!e.created)continue;
+  const r=Core.parseLink(e.url);if(!r.ok)continue;
+  const k=r.region+'|'+r.params.authkey,prev=byKey.get(k);
+  if(!prev||prev.created<e.created)byKey.set(k,{...r,created:e.created});
+ }
+ return [...byKey.values()].sort((a,b)=>b.created-a.created);
+}
 function notFound(code,detail){return {ok:false,code,reason:FIND_REASONS[code]+(detail?' '+detail:''),steps:Core.MANUAL_STEPS.slice()};}
 // findLink({env, fs, path, gameDirs}) -> {ok:true, url, region, host, source:'cache', file, mtime, candidates, installDir, logs}
 //                                     | {ok:false, code, reason, steps}
@@ -71,9 +83,13 @@ function findLink({env=process.env,fs=nodeFs,path=nodePath,gameDirs=[],maxLogByt
  for(const f of files){
   if(f.size>maxCacheBytes){readErrors++;continue;}
   let data;try{data=fs.readFileSync(f.file);}catch{readErrors++;continue;}
+  // The cache index knows when each response was stored: the newest stored link is the one the game opened last.
+  // (The link's own `timestamp` parameter is not the opening time: on a real cache it points at an older link.)
+  const indexed=indexedLinks(fs,path,path.dirname(f.file));
+  if(indexed.length){const n=indexed[0];return {ok:true,url:n.url,region:n.region,host:n.host,source:'cache',file:f.file,mtime:f.mtime,linkTime:n.created,candidates:indexed.slice(0,5).map(l=>l.url),installDir:f.installDir,logs:logs.map(l=>l.file)};}
   const links=Core.extractLinks(data);if(!links.length)continue;
   const newest=links[links.length-1];
-  return {ok:true,url:newest.url,region:newest.region,host:newest.host,source:'cache',file:f.file,mtime:f.mtime,candidates:links.slice().reverse().slice(0,5).map(l=>l.url),installDir:f.installDir,logs:logs.map(l=>l.file)};
+  return {ok:true,url:newest.url,region:newest.region,host:newest.host,source:'cache',file:f.file,mtime:f.mtime,linkTime:null,candidates:links.slice().reverse().slice(0,5).map(l=>l.url),installDir:f.installDir,logs:logs.map(l=>l.file)};
  }
  return readErrors===files.length?notFound('READ_ERROR'):notFound('NO_LINK');
 }
