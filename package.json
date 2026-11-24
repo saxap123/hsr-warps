@@ -1,0 +1,10 @@
+{
+  "name": "hsr-warp-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal Honkai: Star Rail warp tracker (Electron, portable)",
+  "scripts": {
+    "assets": "node scripts/build_assets.cjs",
+    "test": "node scripts/test_warps.cjs && node scripts/test_tracker.cjs"
+  }
+}

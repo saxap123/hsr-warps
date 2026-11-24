@@ -1,0 +1,7 @@
+{
+  "name": "hsr-warp-tracker",
+  "productName": "HSR Warp Tracker",
+  "version": "0.1.0",
+  "main": "main.cjs",
+  "description": "Личный трекер круток Honkai: Star Rail"
+}
