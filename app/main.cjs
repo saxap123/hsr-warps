@@ -2,22 +2,23 @@
 // HSR Warp Tracker, Electron main process. Portable: settings, history and backups live in <exe folder>/userdata.
 // The full history link (authkey) stays in this process, in memory only: the page gets its masked form; it is never
 // written to a file or the log (warps.cjs masks it). Game files are only read (Player.log, web cache).
-// Test launches: --test (hidden window) and --shots (offscreen); only with --test are these hooks read:
+// Test launches: --test (hidden window), --shots (offscreen) and --smoke-test (hidden, own profile, writes
+// smoke-test.json beside the exe and exits); none of them reaches the real server. Only with --test are these read:
 //  HSRW_TEST_ORIGIN=http://127.0.0.1:<port>  every warp API request goes there instead of the official host;
 //  HSRW_TEST_HOME=<folder>                   stands in for USERPROFILE / APPDATA when the game files are searched.
 // HSRW_PROFILE=<folder> (any launch) moves userdata, e.g. for a test profile.
 const {app,BrowserWindow,protocol,net,ipcMain,dialog,session,Menu,shell}=require('electron');
 const path=require('node:path'),fs=require('node:fs'),crypto=require('node:crypto'),{pathToFileURL}=require('node:url');
 const W=require('./warps.cjs'),G=require('./game-cache.cjs'),Core=require('./core/warps-core.js'),Srgf=require('./core/srgf.js'),{readArchiver}=require('./archiver.cjs');
-const root=__dirname,test=process.argv.includes('--test'),shots=process.argv.includes('--shots'),hidden=test||shots;
-const profile=process.env.HSRW_PROFILE?path.resolve(process.env.HSRW_PROFILE):path.join(path.dirname(process.execPath),'userdata');
+const root=__dirname,test=process.argv.includes('--test'),shots=process.argv.includes('--shots'),smoke=process.argv.includes('--smoke-test'),hidden=test||shots||smoke;
+const profile=process.env.HSRW_PROFILE?path.resolve(process.env.HSRW_PROFILE):path.join(path.dirname(process.execPath),'userdata',smoke?'smoke-test-profile':'');
 app.setPath('userData',profile);app.setName('HSR Warp Tracker');
 protocol.registerSchemesAsPrivileged([{scheme:'app',privileges:{standard:true,secure:true,supportFetchAPI:true}}]);
 const version=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;
 const dirs={warps:path.join(profile,'warps'),banners:path.join(profile,'banners'),log:path.join(profile,'app.log'),settings:path.join(profile,'settings.json')};
 const log=W.createLog({file:dirs.log});
 // ---------- settings (small JSON, atomic write) ----------
-const SETTINGS_KEYS={variant:v=>['A','B','C'].includes(v)?v:undefined,archiverFile:v=>typeof v==='string'&&v.length<1024?v:undefined,jade:v=>Number.isFinite(+v)&&+v>=0&&+v<1e8?Math.floor(+v):undefined,
+const SETTINGS_KEYS={archiverFile:v=>typeof v==='string'&&v.length<1024?v:undefined,jade:v=>Number.isFinite(+v)&&+v>=0&&+v<1e8?Math.floor(+v):undefined,
  passes:v=>Number.isFinite(+v)&&+v>=0&&+v<1e5?Math.floor(+v):undefined,extra:v=>Number.isFinite(+v)&&+v>=0&&+v<1e5?Math.floor(+v):undefined,jadeSource:v=>['manual','archiver'].includes(v)?v:undefined,uid:v=>/^\d{5,12}$/.test(String(v))?String(v):undefined,
  planner:v=>v&&typeof v==='object'?JSON.parse(JSON.stringify(v)):undefined};
 function readSettings(){try{const v=JSON.parse(fs.readFileSync(dirs.settings,'utf8'));return v&&typeof v==='object'?v:{};}catch{return {};}}
@@ -29,12 +30,17 @@ function writeSettings(patch){
 const testValue=name=>test?process.env[name]||'':'';
 // --test: a fake game tree or none; --shots (screenshots) reads the real game files like a normal launch (read only).
 function gameEnv(){if(!test)return process.env;const home=testValue('HSRW_TEST_HOME');return home?{USERPROFILE:path.resolve(home),APPDATA:path.join(path.resolve(home),'AppData','Roaming')}:{};}
+// History requests go through their own in-memory session without an HTTP cache: the default session would write
+// every request URL — authkey included — into userdata/Cache/Cache_Data (caught by test_ui_electron.cjs).
+let apiSession=null;
+const api=()=>apiSession||(apiSession=session.fromPartition('hsrw-api',{cache:false}));
 function warpsFetch(url,options){
- if(!hidden)return net.fetch(url,options);
+ const o={...options,cache:'no-store'};
+ if(!hidden)return api().fetch(url,o);
  // Test and screenshot launches never reach the real server: only a loopback test origin (read with --test).
  const origin=testValue('HSRW_TEST_ORIGIN');
  if(!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(origin))return Promise.reject(Error('Test launch: HSRW_TEST_ORIGIN=http://127.0.0.1:<port> is required'));
- const u=new URL(url);return net.fetch(origin+u.pathname+u.search,options);
+ const u=new URL(url);return api().fetch(origin+u.pathname+u.search,o);
 }
 let cacheInfo={pageTypes:{},banners:[],readAt:0},bannerImages=new Map();
 // Banner details and their strip images from the game cache; images are copied to userdata/banners so they stay
@@ -68,7 +74,7 @@ app.whenReady().then(()=>{
  });
  session.defaultSession.setPermissionRequestHandler((wc,permission,cb)=>cb(false));
  const win=new BrowserWindow({width:1440,height:960,minWidth:1024,minHeight:700,title:'HSR Warp Tracker',backgroundColor:'#090b14',show:!hidden,autoHideMenuBar:true,
-  webPreferences:{contextIsolation:true,sandbox:true,nodeIntegration:false,offscreen:shots,preload:path.join(root,'preload.cjs')}});
+  webPreferences:{contextIsolation:true,sandbox:true,nodeIntegration:false,offscreen:shots,preload:path.join(root,'preload.cjs'),additionalArguments:smoke?['--hsrw-smoke']:[]}});
  Menu.setApplicationMenu(null);
  const trusted=event=>{if(event.sender!==win.webContents)throw Error('Unknown renderer');};
  const service=W.createWarpsService({dir:dirs.warps,fetch:warpsFetch,log});
@@ -127,6 +133,13 @@ app.whenReady().then(()=>{
  app.on('before-quit',()=>abort?.abort());
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',(event,url)=>{if(!url.startsWith('app://ui/'))event.preventDefault();});
+ if(smoke){
+  const errors=[],out=path.join(path.dirname(process.execPath),'smoke-test.json');
+  win.webContents.on('console-message',e=>{if(e.level==='error')errors.push(e.message);});
+  win.webContents.on('did-fail-load',(_e,code,desc,url)=>errors.push(code+': '+desc+' '+url));
+  ipcMain.on('hsrw-ready',(event,report)=>{if(event.sender!==win.webContents)return;setTimeout(()=>{fs.writeFileSync(out,JSON.stringify({ok:!errors.length,version,loaded:win.webContents.getURL(),title:win.getTitle(),ready:report,errors},null,2));app.exit(errors.length?1:0);},400);});
+  setTimeout(()=>{fs.writeFileSync(out,JSON.stringify({ok:false,error:'Timed out',errors},null,2));app.exit(1);},20000);
+ }
  log('start',version,hidden?'(test)':'');
  win.loadURL('app://ui/index.html');
 });

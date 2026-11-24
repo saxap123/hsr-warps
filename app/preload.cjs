@@ -1,6 +1,8 @@
 const {contextBridge,ipcRenderer}=require('electron');
 // The page never sees the full history link and never calls the API itself.
 contextBridge.exposeInMainWorld('desktop',Object.freeze({
+ smoke:process.argv.includes('--hsrw-smoke'),
+ ready:report=>ipcRenderer.send('hsrw-ready',report),
  state:()=>ipcRenderer.invoke('hsrw-state'),
  find:()=>ipcRenderer.invoke('hsrw-find'),
  update:options=>ipcRenderer.invoke('hsrw-update',options?.useFound===true?{useFound:true}:{url:String(options?.url??'')}),

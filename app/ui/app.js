@@ -1,14 +1,14 @@
-/* Page flow: open the saved history, «Обновить» (find the link in the game files, then load only new pulls),
-   paste a link by hand, cancel, progress, notices. The main screen itself is drawn by the chosen design variant
-   (window.Variants); every number comes from View.build. */
+/* Page flow and router: open the saved history, «Обновить» (find the link in the game files, then load only new
+   pulls), paste a link by hand, cancel, progress, notices; the screens (window.Screens: main, history, collection,
+   luck, plan, settings) draw from one view model (View.build). Nothing runs in the background. */
 (function(){
  const Core=window.WarpsCore,V=window.View,esc=V.esc,desktop=window.desktop;
  const S={ready:false,history:null,accounts:[],settings:{},cache:null,catalog:null,version:'',vm:null,
-  busy:null,progress:null,cancelling:false,found:null,problem:null,paste:'',pasteError:null,notice:null,error:null,variant:'A',tab:'main'};
+  busy:null,progress:null,cancelling:false,found:null,problem:null,paste:'',pasteError:null,notice:null,error:null,tab:'main'};
  window.AppState=S;
  const message=e=>String(e?.message||e||'Неизвестная ошибка').replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/,'');
  function rebuild(){S.vm=S.history?V.build(S.history,{catalog:S.catalog,cache:S.cache,now:Date.now()}):null;}
- // ---------- shared pieces (used by every variant) ----------
+ // ---------- shared pieces ----------
  const stepsHtml=()=>`<ol class="steps">${Core.MANUAL_STEPS.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`;
  function pasteHtml(){
   return `<div class="paste"><label for="paste">Ссылка на историю прыжков</label>
@@ -46,22 +46,26 @@
   if(S.busy)body=progressHtml();
   else if(S.problem)body=problemHtml();
   else body=`<p class="lead" data-first><b>${esc(Core.TEXTS.startFirst)}</b></p><p>Игра сама сохраняет ссылку в своём кэше, когда ты открываешь историю прыжков. Программа только читает файлы игры — память игры не трогает и ничего в игре не меняет.</p>
-   <div class="row"><button class="btn primary big" data-act="refresh">Найти ссылку и загрузить историю</button><button class="btn ghost" data-act="import">Импорт SRGF / UIGF</button></div>`;
+   <div class="row"><button class="btn primary big" data-act="refresh">Найти ссылку и загрузить историю</button><button class="btn ghost" data-act="import">Импорт SRGF / UIGF / истории HSR Atelier</button></div>`;
  return `<div class="start"><div class="start-card"><h1>Трекер круток</h1><p class="sub">Гарант на каждом баннере, все 5★, удача и планы — по твоей истории прыжков.</p>${noticeHtml()}${body}${privacy}</div></div>`;
  }
- // The top block of the main screen while busy / after a problem: shared by the variants.
+ // The top block of every screen while busy / after a problem.
  function statusHtml(){
   if(S.busy)return progressHtml();
   if(S.problem)return `<div class="problem-wrap">${problemHtml()}</div>`;
   return '';
  }
+ // The element being typed in is found again after a redraw (same data attributes), with its caret.
+ function focusKey(el){if(!el||!el.dataset)return null;for(const k of ['hf','pb','pst','paste','cs'])if(k in el.dataset)return '[data-'+k+(el.dataset[k]?'="'+CSS.escape(el.dataset[k])+'"':'')+']'+(el.dataset.f?'[data-f="'+CSS.escape(el.dataset.f)+'"]':'');return null;}
  function draw(){
   const root=document.getElementById('app');
-  document.body.dataset.variant=S.variant;
+  const key=focusKey(document.activeElement),sel=key&&document.activeElement.selectionStart!==undefined?[document.activeElement.selectionStart,document.activeElement.selectionEnd]:null;
   if(!S.ready){root.innerHTML='<div class="start"><div class="start-card"><p>Открываю сохранённую историю…</p></div></div>';return;}
-  if(!S.history){root.innerHTML=startHtml();return;}
-  const render=window.Variants[S.variant]||window.Variants.A;
-  root.innerHTML=render(S.vm,{status:statusHtml(),notice:noticeHtml(),busy:!!S.busy,variant:S.variant,variants:Object.keys(window.Variants),accounts:S.accounts,version:S.version,tab:S.tab});
+  const ctx={status:statusHtml(),notice:noticeHtml(),busy:!!S.busy};
+  if(!S.history&&S.tab!=='settings'){root.innerHTML=startHtml();return;}
+  const screen=window.Screens[S.tab]||window.Screens.main;
+  root.innerHTML=screen(S.vm,ctx);
+  if(key){const el=root.querySelector(key);if(el){el.focus();try{if(sel)el.setSelectionRange(sel[0],sel[1]);}catch{}}}
  }
  function drawProgress(){for(const box of document.querySelectorAll('[data-progress]')){const t=box.querySelector('[data-progress-text]');if(t)t.textContent=progressText();const bar=box.querySelector('.track i');if(bar)bar.style.width=share()+'%';}}
  // ---------- flow ----------
@@ -70,12 +74,12 @@
   try{
    const [state,catalog]=await Promise.all([desktop.state(),fetch('app://ui/catalog.json').then(r=>r.json())]);
    Object.assign(S,{history:state.history,accounts:state.accounts||[],settings:state.settings||{},cache:state.cache,version:state.version,catalog});
-   S.variant=new URLSearchParams(location.search).get('variant')||S.settings.variant||'A';
    if(state.error)S.error='Не получилось открыть сохранённую историю: '+state.error;
    rebuild();
   }catch(e){S.error=message(e);}
   S.ready=true;draw();
   window.dispatchEvent(new Event('hsrw-ready'));
+  if(desktop.smoke)desktop.ready({screens:Object.keys(window.Screens),history:!!S.history,total:S.vm?.total||0,errors:[]});
  }
  async function find(){
   S.busy='find';S.problem=null;S.error=null;S.notice=null;S.pasteError=null;draw();
@@ -113,7 +117,7 @@
   let r;try{r=await desktop.importFile();}catch(e){r={ok:false,reason:message(e)};}
   if(!r)return;
   if(!r.ok){S.error=r.reason;draw();return;}
-  const st=await desktop.state();Object.assign(S,{history:st.history,accounts:st.accounts});rebuild();
+  const st=await desktop.state();Object.assign(S,{history:st.history,accounts:st.accounts,settings:st.settings});rebuild();
   S.notice={kind:'good',text:`Импорт ${r.format}: `+r.result.map(x=>`UID ${x.uid} — добавлено ${V.pulls(x.added)}, всего ${V.pulls(x.total)}`).join('; ')+(r.warnings?.length?' '+r.warnings.join(' '):'')};draw();
  }
  document.addEventListener('click',e=>{
@@ -124,8 +128,7 @@
   else if(a==='paste')paste();
   else if(a==='cancel'){S.cancelling=true;drawProgress();desktop.cancel();}
   else if(a==='import')importFile();
-  else if(a==='variant'){S.variant=el.dataset.v;desktop.settings({variant:S.variant});draw();}
-  else if(a==='tab'){S.tab=el.dataset.tab;draw();}
+  else if(a==='tab'){S.tab=el.dataset.tab;S.notice=S.busy?S.notice:null;draw();scrollTo(0,0);}
  });
  document.addEventListener('input',e=>{if(e.target.matches?.('[data-paste]'))S.paste=e.target.value;});
  window.App={state:S,draw,rebuild,find,load};

@@ -219,8 +219,8 @@
  }
  // Summary over the filtered rows: found, average pity (5★/4★ rows with an exact pity), earliest and latest.
  function summary(rows){
-  const withPity=rows.filter(r=>r.rarity>=4&&r.exact);
-  return {count:rows.length,avgPity:avg(withPity.map(r=>r.pity)),avgCount:withPity.length,first:rows.reduce((m,r)=>!m||r.at<m.at?r:m,null),last:rows.reduce((m,r)=>!m||r.at>m.at?r:m,null)};
+  const withPity=rows.filter(r=>r.rarity>=4&&r.exact),five=withPity.filter(r=>r.rarity===5),four=withPity.filter(r=>r.rarity===4);
+  return {count:rows.length,avgPity:avg(withPity.map(r=>r.pity)),avgCount:withPity.length,avg5:avg(five.map(r=>r.pity)),n5:five.length,avg4:avg(four.map(r=>r.pity)),n4:four.length,first:rows.reduce((m,r)=>!m||r.at<m.at?r:m,null),last:rows.reduce((m,r)=>!m||r.at>m.at?r:m,null)};
  }
  // Banner details read from the game cache (game-cache.cjs) -> loss pools for classify() and the latest banner per type.
  // Light cones come without ids: they are matched by name (catalog Russian / English names, names in the history).

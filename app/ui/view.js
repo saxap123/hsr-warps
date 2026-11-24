@@ -1,4 +1,4 @@
-/* View model of the main screen, shared by every design variant: banners with their pity, guarantee and art, the
+/* View model shared by every screen: banners with their pity, guarantee and art, the
    latest 5★ with portraits, a short luck line. All numbers come from WarpsAnalysis / WarpsModel. */
 (function(){
  const A=window.WarpsAnalysis,M=window.WarpsModel,Core=window.WarpsCore;
@@ -9,15 +9,15 @@
  // Server time «2026-11-21 00:19:46» as «21 нояб.» (+ year when not this year).
  function day(time,withYear){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(time||''));if(!m)return '';const y=+m[1],now=new Date().getFullYear();return (+m[3])+' '+MONTHS[+m[2]-1]+(withYear||y!==now?' '+y:'');}
  function when(ms){const d=new Date(ms);if(!Number.isFinite(d.getTime()))return '';return d.toLocaleString('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});}
- let catalogMap=null;
- function art(catalog,id){if(!catalogMap){catalogMap=new Map((catalog?.items||[]).map(x=>[x.id,x]));}const x=catalogMap.get(String(id||''));return x&&x.art?'app://items/'+x.id+'.webp':'';}
+ let catalogMap=null,lastCatalog=null;
+ function art(catalog,id){const cat=catalog||lastCatalog;if(!catalogMap){catalogMap=new Map((cat?.items||[]).map(x=>[x.id,x]));}const x=catalogMap.get(String(id||''));return x&&x.art?'app://items/'+x.id+'.webp':'';}
  const GUARANTEE={
   yes:(b)=>({cls:'yes',icon:'🔒',title:'Гарант есть',text:'Следующая 5★ — точно '+(b.kind==='lightcone'?'конус':'персонаж')+' баннера'}),
   no:(b)=>({cls:'no',icon:'½',title:'Без гаранта · '+b.rateText,text:'Следующая 5★ — '+(b.kind==='lightcone'?'конус':'персонаж')+' баннера с шансом '+(b.rate===0.75?'75%':'50%')}),
   unknown:(b)=>({cls:'unknown',icon:'?',title:'Гарант: не ясно',text:b.fiveCount?'Последнюю 5★ нельзя точно отнести к выигрышу или проигрышу':'В истории ещё нет 5★ на этом баннере'})};
  const OUTCOME={won:{cls:'won',icon:'✓',short:'выиграл'},lost:{cls:'lost',icon:'✕',short:'проиграл'},guaranteed:{cls:'guar',icon:'🔒',short:'гарант'},uncertain:{cls:'unk',icon:'?',short:'не ясно'}};
  function build(history,{catalog=null,cache=null,now=Date.now()}={}){
-  catalogMap=null;
+  catalogMap=null;lastCatalog=catalog||lastCatalog;
   const fc=A.fromGameCache(cache?.banners||[],{catalog,history});
   const st=A.analyze(history,{catalog,now,pools:fc.pools,discovered:cache?.pageTypes||null});
   const luck=M.luck(A.luckInput(st));
